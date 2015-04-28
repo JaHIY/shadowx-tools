@@ -16,7 +16,7 @@ use JSON ();
 use Text::Trim qw(trim);
 use URI;
 use Web::Scraper;
-use YAML::Any ();
+use YAML ();
 
 my $CONFIG_FILE = "${FindBin::RealBin}/config.yml";
 my $USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:36.0) Gecko/20100101 Firefox/36.0';
@@ -117,7 +117,7 @@ sub main {
         'sys-info!'
     );
 
-    my $config = YAML::Any::LoadFile( $CONFIG_FILE );
+    my $config = YAML::LoadFile( $CONFIG_FILE );
     my $cookie_jar = HTTP::CookieJar->new;
     my $http = HTTP::Tiny->new(
         agent => $USER_AGENT,
