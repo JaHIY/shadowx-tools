@@ -7,6 +7,7 @@ use 5.010;
 use autodie;
 
 use Carp qw(croak);
+use Data::Dumper;
 use Encode qw(decode);
 use FindBin;
 use Getopt::Long ();
@@ -20,7 +21,7 @@ use YAML ();
 
 my $CONFIG_FILE = "${FindBin::RealBin}/config.yml";
 my $USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:36.0) Gecko/20100101 Firefox/36.0';
-my $BASE_URL = 'https://cattt.com';
+my $BASE_URL = 'https://shadowx.co';
 my $BASE_URI = URI->new( $BASE_URL );
 
 sub build_uri_path {
@@ -30,26 +31,40 @@ sub build_uri_path {
     return $uri_clone;
 }
 
+sub get_token {
+    my ( $http ) = @_;
+    my $login_page_response = $http->get( build_uri_path( $BASE_URI, '/auth/login' ) );
+
+    croak sprintf( 'Cannot get login page! (%d: %s)', $login_page_response->{status}, $login_page_response->{reason} ) if not $login_page_response->{success};
+
+    my $scraper = scraper {
+        process_first 'input[name="_token"]', 'token' => '@value';
+    };
+    my $res = $scraper->scrape( decode( 'utf8', $login_page_response->{content} ) );
+    return $res->{token};
+}
+
 sub login {
     my ( $http, $account ) = @_;
-    my $login_response = $http->post_form( build_uri_path( $BASE_URI, '/user/_login.php' ), {
+    my $token = get_token( $http );
+    my $login_response = $http->post_form( build_uri_path( $BASE_URI, '/auth/login' ), {
             email => $account->{email},
-            passwd => $account->{password},
-            remember => 'week',
+            password => $account->{password},
+            _token => $token,
         }, {
             headers => {
-                Referer => build_uri_path( $BASE_URI, '/user/login.php' ),
+                Referer => build_uri_path( $BASE_URI, '/auth/login' ),
             },
         } );
-    croak sprintf( 'Cannot login! (%d: %s)', $login_response->{status}, $login_response->{reason} ) if not $login_response->{success};
+    croak sprintf( 'Cannot login! (%d: %s)', $login_response->{status}, $login_response->{reason} ) if $login_response->{status} != 302;
 }
 
 sub checkin {
     my ( $http ) = @_;
-    my $checkin_response = $http->get( build_uri_path( $BASE_URI, '/user/_checkin.php' ), {
+    my $checkin_response = $http->get( build_uri_path( $BASE_URI, '/user/checkin' ), {
             headers => {
                 'X-Requested-With' => 'XMLHttpRequest',
-                Referer => build_uri_path( $BASE_URI, '/user/index.php' ),
+                Referer => build_uri_path( $BASE_URI, '/user' ),
             }
         } );
     croak sprintf( 'Cannot checkin! (%d: %s)', $checkin_response->{status}, $checkin_response->{reason} ) if not $checkin_response->{success};
@@ -58,7 +73,7 @@ sub checkin {
 
 sub get_account_info {
     my ( $http ) = @_;
-    my $account_info_response = $http->get( build_uri_path( $BASE_URI, '/user/index.php' ) );
+    my $account_info_response = $http->get( build_uri_path( $BASE_URI, '/user' ) );
     croak sprintf( 'Cannot get account info! (%d: %s)', $account_info_response->{status}, $account_info_response->{reason} ) if not $account_info_response->{success};
     my $scraper = scraper {
         process '.box', 'box[]' => scraper {
@@ -72,7 +87,7 @@ sub get_account_info {
 
 sub get_node_info {
     my ( $http ) = @_;
-    my $node_info_response = $http->get( build_uri_path( $BASE_URI, '/user/node.php' ) );
+    my $node_info_response = $http->get( build_uri_path( $BASE_URI, '/user/node' ) );
     croak sprintf( 'Cannot get node info! (%d: %s)', $node_info_response->{status}, $node_info_response->{reason} ) if not $node_info_response->{success};
     my $scraper = scraper {
         process '.content-wrapper .col-md-6 > .box', 'node_lists[]' => scraper {
@@ -92,7 +107,7 @@ sub get_node_info {
 
 sub get_sys_info {
     my ( $http ) = @_;
-    my $sys_info_response = $http->get( build_uri_path( $BASE_URI, '/user/sys.php' ) );
+    my $sys_info_response = $http->get( build_uri_path( $BASE_URI, '/user/sys' ) );
     croak sprintf( 'Cannot get sys info! (%d: %s)', $sys_info_response->{status}, $sys_info_response->{reason} ) if not $sys_info_response->{success};
     my $scraper = scraper {
         process '.box-body > p', 'sys[]' => [ 'TEXT', sub { trim } ];
@@ -128,7 +143,6 @@ sub main {
 
     if ( defined $option_of{checkin} and $option_of{checkin} == 1 ) {
         say checkin( $http )->{msg};
-        print "\n";
     }
 
     if ( defined $option_of{'account-info'} and $option_of{'account-info'} == 1 ) {
@@ -138,7 +152,6 @@ sub main {
             map { say $_ } @{ $box->{body} };
             print "\n";
         }
-        print "\n";
     }
 
     if ( defined $option_of{'node-info'} and $option_of{'node-info'} == 1 ) {
@@ -151,14 +164,12 @@ sub main {
                 map { say $node->{ $_ } } @fields;
                 print "\n";
             }
-            print "\n";
         }
     }
 
     if ( defined $option_of{'sys-info'} and $option_of{'sys-info'} == 1 ) {
         my $sys_info = get_sys_info( $http );
         map { say $_ } @{ $sys_info };
-        print "\n";
     }
 }
 
